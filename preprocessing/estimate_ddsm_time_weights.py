@@ -21,7 +21,7 @@ from utils.model_utils import torch_load
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Estimate DDSM time-dependent loss weights.")
-    parser.add_argument("--processed_csv", default="data/processed/g4_structure_dataset.csv")
+    parser.add_argument("--processed_csv", default="data/processed/g4_structure_conditions.csv")
     parser.add_argument("--file_path_seq", default="../../quadruplex/data/hg38.fa")
     parser.add_argument(
         "--condition_mode",

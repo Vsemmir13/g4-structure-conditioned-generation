@@ -32,16 +32,10 @@ g4_structure_conditioning/
   metrics/
   analysis/
   preprocessing/
-    annotate_topology.py
-    annotate_stability.py
-    build_structure_dataset.py
+    annotate_structure_conditions.py
   data/
     processed/
-      g4_structure_dataset.csv
-      splits/
-        train.csv
-        val.csv
-        test.csv
+      g4_structure_conditions.csv
   reports/
     dataset_statistics/
     topology_eval/
@@ -214,13 +208,11 @@ Add stability metrics later:
 
 ## First Implementation Steps
 
-1. Add `preprocessing/annotate_topology.py`.
-2. Add `preprocessing/annotate_stability.py`.
-3. Add `preprocessing/build_structure_dataset.py`.
-4. Add a generic condition mapping utility.
-5. Update dataset loading to read processed CSV files.
-6. Update `main.py` to accept `--condition_name topology`.
-7. Update metrics to report topology-specific control metrics.
-8. Run a small CPU/MPS smoke test on 100 samples.
-9. Run full annotation.
+1. Add `preprocessing/annotate_structure_conditions.py`.
+2. Add a simple two-condition mapping in `utils/data_utils.py`.
+3. Update dataset loading to read the annotated CSV directly.
+4. Update `main.py` to train with stability and topology conditions.
+5. Update metrics to report topology- and stability-specific control metrics.
+6. Run a small CPU/MPS smoke test on 100 samples.
+7. Run full annotation.
 10. Train topology-conditioned LSTM as the first baseline.

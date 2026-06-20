@@ -64,7 +64,6 @@ g4_structure_conditioning/
   preprocessing/
     annotate_structure_conditions.py
                                   # short G4 sequence -> topology/Tm/stability
-    build_structure_dataset.py    # annotated conditions -> 512 bp model dataset
     run_g4shape_predictor.py      # headless G4ShapePredictor wrapper
     run_g4stab.py                 # G4STAB wrapper
     run_full_annotation_pipeline.sh
@@ -215,32 +214,24 @@ g4stab_std
 assigned during annotation; they can be defined later in the dataloader or
 experiment configuration.
 
-## 3. Build The Processed Dataset
+## 3. Training Dataset Construction
 
-The training code reads `data/processed/g4_structure_dataset.csv`. This second
-stage takes the annotated short-sequence table, extracts the 512 bp genomic
-context used by the neural models, and adds train/validation/test split labels.
+The training code reads `data/processed/g4_structure_conditions.csv` directly.
+No second processed dataset is created. During training, `utils/data_utils.py`
+adds `stability_class` from `predicted_tm`, filters examples with
+`g4stab_std > 5.0`, stratifies the split by
+`stability_class + topology_label`, and extracts 512 bp model windows from the
+reference genome using the original EndoQuad coordinates.
 
-```bash
-python preprocessing/build_structure_dataset.py \
-  --annotated_csv data/processed/g4_structure_conditions.csv \
-  --file_path_seq ../../quadruplex/data/hg38.fa \
-  --output_csv data/processed/g4_structure_dataset.csv
-```
-
-Additional output columns:
+The default stability thresholds are:
 
 ```text
-context_start
-context_end
-model_sequence            # 512 bp context used for model training
-split
+low:    predicted_tm < 52
+medium: 52 <= predicted_tm < 65
+high:   predicted_tm >= 65
 ```
 
-The builder stratifies by `topology_label`. `predicted_tm` is preserved in the
-final CSV for later thresholding or continuous conditioning.
-
-To run both stages:
+To run the annotation stage:
 
 ```bash
 bash preprocessing/run_full_annotation_pipeline.sh
@@ -273,7 +264,7 @@ estimate them after the processed dataset is built:
 
 ```bash
 python preprocessing/estimate_ddsm_time_weights.py \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --noise_table_path data/ddsm_noise/steps400.cat4.speed_balance.time4.0.samples100000.pth \
   --output_path data/ddsm_noise/time_dependent_weights.pth \
@@ -317,7 +308,7 @@ python -m py_compile \
   main.py generate.py \
   models/lstm.py models/vae.py models/dfm_model.py models/dfm_module.py models/ddsm_module.py \
   utils/data_utils.py utils/model_factory.py utils/config.py \
-  preprocessing/annotate_structure_conditions.py preprocessing/build_structure_dataset.py
+  preprocessing/annotate_structure_conditions.py preprocessing/annotate_structure_conditions.py
 ```
 
 ## 6. Train Models
@@ -325,7 +316,7 @@ python -m py_compile \
 All final runs should use the processed CSV:
 
 ```text
-data/processed/g4_structure_dataset.csv
+data/processed/g4_structure_conditions.csv
 ```
 
 ### LSTM
@@ -334,7 +325,7 @@ data/processed/g4_structure_dataset.csv
 python main.py \
   --experiment_name topology_lstm \
   --model_type lstm \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --batch_size 256 \
   --max_epochs 200 \
@@ -350,7 +341,7 @@ python main.py \
 python main.py \
   --experiment_name topology_vae \
   --model_type vae \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --batch_size 256 \
   --max_epochs 200 \
@@ -366,7 +357,7 @@ python main.py \
 python main.py \
   --experiment_name topology_dfm \
   --model_type dfm \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --batch_size 512 \
   --max_epochs 5000 \
@@ -384,7 +375,7 @@ python main.py \
 python main.py \
   --experiment_name topology_dfm_transformer \
   --model_type dfm_transformer \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --batch_size 512 \
   --max_epochs 5000 \
@@ -402,7 +393,7 @@ python main.py \
 python main.py \
   --experiment_name topology_ddsm \
   --model_type ddsm \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --ddsm_noise_table_path data/ddsm_noise/steps400.cat4.speed_balance.time4.0.samples100000.pth \
   --ddsm_time_dependent_weights_path data/ddsm_noise/time_dependent_weights.pth \
@@ -439,7 +430,7 @@ mkdir -p logs/slurm
 python main.py \
   --experiment_name topology_dfm \
   --model_type dfm \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --batch_size 512 \
   --max_epochs 5000 \
@@ -482,7 +473,7 @@ fi
 python main.py \
   --experiment_name topology_ddsm \
   --model_type ddsm \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --ddsm_noise_table_path "$NOISE" \
   --batch_size 256 \
@@ -515,7 +506,7 @@ Resume training:
 python main.py \
   --experiment_name topology_dfm \
   --model_type dfm \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --ckpt_path checkpoints/dfm/topology_dfm/last.ckpt \
   --batch_size 512 \
@@ -529,7 +520,7 @@ Evaluate a checkpoint without training:
 python main.py \
   --experiment_name topology_dfm_test \
   --model_type dfm \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --run_mode test \
   --ckpt_path checkpoints/dfm/topology_dfm/last.ckpt \
@@ -545,7 +536,7 @@ For DDSM checkpoints trained with official noise:
 python main.py \
   --experiment_name topology_ddsm_test \
   --model_type ddsm \
-  --processed_csv data/processed/g4_structure_dataset.csv \
+  --processed_csv data/processed/g4_structure_conditions.csv \
   --condition_mode topology \
   --run_mode test \
   --ckpt_path checkpoints/ddsm/topology_ddsm/last.ckpt \
