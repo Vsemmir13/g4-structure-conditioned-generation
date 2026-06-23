@@ -29,7 +29,7 @@ class QuadLSTM(LightningModule):
         self,
         vocab_size=5,
         emb_dim=128,
-        level_dim=8,
+        cond_dim=8,
         num_cls=3,
         hidden_dim=256,
         num_layers=2,
@@ -45,10 +45,10 @@ class QuadLSTM(LightningModule):
         self.sample_temperature = float(sample_temperature)
         self.top_k = int(top_k)
         self.emb = nn.Embedding(vocab_size, emb_dim)
-        self.condition_encoder = ConditionEncoder(num_cls, level_dim, out_dim=level_dim, dropout=dropout)
+        self.condition_encoder = ConditionEncoder(num_cls, cond_dim, out_dim=cond_dim, dropout=dropout)
         self.input_proj = nn.Sequential(
-            nn.LayerNorm(emb_dim + level_dim),
-            nn.Linear(emb_dim + level_dim, hidden_dim),
+            nn.LayerNorm(emb_dim + cond_dim),
+            nn.Linear(emb_dim + cond_dim, hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
         )
@@ -73,12 +73,12 @@ class QuadLSTM(LightningModule):
         self.test_losses = []
         self.lr = lr
 
-    def forward(self, x, levels):
+    def forward(self, x, cond):
         B, T = x.shape
         token_emb = self.emb(x)
-        level_emb = self.condition_encoder(levels, batch_size=B)
-        level_emb = level_emb.unsqueeze(1).expand(B, T, -1)
-        inp = torch.cat([token_emb, level_emb], dim=-1)
+        cond_emb = self.condition_encoder(cond, batch_size=B)
+        cond_emb = cond_emb.unsqueeze(1).expand(B, T, -1)
+        inp = torch.cat([token_emb, cond_emb], dim=-1)
         inp = self.input_proj(inp)
         out, _ = self.lstm(inp)
         out = self.mlp_blocks(self.out_norm(out))
@@ -86,16 +86,16 @@ class QuadLSTM(LightningModule):
         return logits
 
     @torch.no_grad()
-    def generate(self, levels, seq_len, greedy=False, temperature=None, top_k=None):
-        device = levels.device
-        bsz = levels.size(0)
-        level_emb = self.condition_encoder(levels, batch_size=bsz).unsqueeze(1)
+    def generate(self, cond, seq_len, greedy=False, temperature=None, top_k=None):
+        device = cond.device
+        bsz = cond.size(0)
+        cond_emb = self.condition_encoder(cond, batch_size=bsz).unsqueeze(1)
         token = torch.full((bsz, 1), 4, dtype=torch.long, device=device)
         hidden = None
         out_tokens = []
         for _ in range(int(seq_len)):
             token_emb = self.emb(token)
-            inp = self.input_proj(torch.cat([token_emb, level_emb], dim=-1))
+            inp = self.input_proj(torch.cat([token_emb, cond_emb], dim=-1))
             out, hidden = self.lstm(inp, hidden)
             out = self.mlp_blocks(self.out_norm(out))
             logits = self.fc_out(out)[:, -1, :4]
@@ -116,8 +116,8 @@ class QuadLSTM(LightningModule):
         return torch.cat(out_tokens, dim=1)
 
     def training_step(self, batch, batch_idx):
-        x, y, levels = batch
-        logits = self(x, levels)
+        x, y, cond = batch
+        logits = self(x, cond)
         loss = self.criterion(logits.view(-1, logits.size(-1)), y.view(-1))
         self.log_dict(
             {
@@ -133,8 +133,8 @@ class QuadLSTM(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y, levels = batch
-        logits = self(x, levels)
+        x, y, cond = batch
+        logits = self(x, cond)
         loss = self.criterion(logits.view(-1, logits.size(-1)), y.view(-1))
         self.log_dict(
             {
@@ -159,8 +159,8 @@ class QuadLSTM(LightningModule):
         return [optimizer], [scheduler]
 
     def test_step(self, batch, batch_idx):
-        x, y, levels = batch
-        logits = self(x, levels)
+        x, y, cond = batch
+        logits = self(x, cond)
         loss = self.criterion(logits.view(-1, logits.size(-1)), y.view(-1))
         self.log(
             "test_loss",
@@ -182,13 +182,13 @@ class QuadLSTM(LightningModule):
         self.test_losses.clear()
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        x, y, levels = batch
-        logits = self(x, levels)
+        x, y, cond = batch
+        logits = self(x, cond)
         recon = torch.argmax(logits, dim=-1)
-        gen = self.generate(levels, seq_len=y.size(1))
+        gen = self.generate(cond, seq_len=y.size(1))
         return {
             "x": x.detach().cpu(),
-            "levels": levels.detach().cpu(),
+            "conditions": cond.detach().cpu(),
             "recon": recon.detach().cpu(),
             "gen": gen.detach().cpu(),
         }

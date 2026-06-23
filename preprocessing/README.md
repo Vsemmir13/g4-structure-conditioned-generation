@@ -18,15 +18,14 @@ score
 strand
 ```
 
-If the input table already contains `sequence`, it is used directly. Otherwise
-the short sequence is extracted from `hg38.fa` using `chrom:start-end`.
+The short sequence is extracted from `hg38.fa` using `chrom:start-end`.
 
 Run:
 
 ```bash
 python preprocessing/annotate_structure_conditions.py \
-  --input_table ../../quadruplex/data/EQ_hg38_lifted.bed \
-  --file_path_seq ../../quadruplex/data/hg38.fa \
+  --input_table data/EQ_hg38_lifted.bed \
+  --file_path_seq data/hg38.fa \
   --output_csv data/processed/g4_structure_conditions.csv
 ```
 
@@ -60,18 +59,3 @@ Training reads this CSV directly. `QuadDataset` derives `stability_class` from
 `predicted_tm`, applies the `g4stab_std` quality filter, creates stratified
 train/validation/test splits, and extracts 512 bp model windows from the
 reference genome at training time.
-
-## Full Pipeline
-
-```bash
-bash preprocessing/run_full_annotation_pipeline.sh
-```
-
-Environment variables can override paths:
-
-```bash
-INPUT_TABLE=../../quadruplex/data/EQ_hg38_lifted.bed \
-GENOME_FASTA=../../quadruplex/data/hg38.fa \
-CONDITIONS_CSV=data/processed/g4_structure_conditions.csv \
-bash preprocessing/run_full_annotation_pipeline.sh
-```

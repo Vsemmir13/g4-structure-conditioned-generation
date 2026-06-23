@@ -22,8 +22,8 @@ PH = 7.0
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Annotate short G4 sequences with topology and stability.")
-    parser.add_argument("--input_table", default="../../quadruplex/data/EQ_hg38_lifted.bed")
-    parser.add_argument("--file_path_seq", default="../../quadruplex/data/hg38.fa")
+    parser.add_argument("--input_table", default="data/EQ_hg38_lifted.bed")
+    parser.add_argument("--file_path_seq", default="data/hg38.fa")
     parser.add_argument("--output_csv", default="data/processed/g4_structure_conditions.csv")
     parser.add_argument("--limit", type=int)
     return parser.parse_args()

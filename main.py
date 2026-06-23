@@ -24,8 +24,8 @@ from utils.model_utils import count_trainable_params, load_weights
 def parse_args():
     p = argparse.ArgumentParser(description="Train/test G4 DNA generative models.")
     p.add_argument("--experiment_name", required=True)
-    p.add_argument("--file_path_quadruplex", default="../../quadruplex/data/EQ_hg38_lifted.bed")
-    p.add_argument("--file_path_seq", default="../../quadruplex/data/hg38.fa")
+    p.add_argument("--file_path_quadruplex", default="data/EQ_hg38_lifted.bed")
+    p.add_argument("--file_path_seq", default="data/hg38.fa")
     p.add_argument("--processed_csv", default="data/processed/g4_structure_conditions.csv")
     p.add_argument(
         "--condition_mode",
@@ -37,9 +37,9 @@ def parse_args():
         default="dfm",
         choices=["lstm", "vae", "dfm", "dfm_transformer", "ddsm"],
     )
-    p.add_argument("--batch_size", type=int, default=256)
-    p.add_argument("--max_epochs", "--epochs", type=int, default=100000)
-    p.add_argument("--max_steps", type=int, default=450000)
+    p.add_argument("--batch_size", type=int, default=512)
+    p.add_argument("--max_epochs", "--epochs", type=int, default=500)
+    p.add_argument("--max_steps", type=int, default=-1)
     p.add_argument("--num_workers", type=int, default=0)
     p.add_argument("--devices", default="auto")
     p.add_argument("--run_mode", default="train", choices=["train", "test"])
@@ -79,8 +79,6 @@ def make_loaders(args):
         split=CFG["split"],
         val_split=CFG["val_split"],
         seed=42,
-        condition_names=args.condition_names,
-        condition_classes=args.condition_classes,
         max_g4stab_std=CFG["max_g4stab_std"],
         stability_low_tm=CFG["stability_low_tm"],
         stability_high_tm=CFG["stability_high_tm"],
@@ -168,8 +166,9 @@ def make_callbacks(args, train_ds):
                 ),
                 save_top_k=CFG["checkpoint_save_top_k"],
                 save_last=True,
-                monitor="val_perplexity",
+                monitor="val_loss",
                 mode="min",
+                filename="{epoch:03d}-{step:06d}-{val_loss:.4f}",
             ),
         )
     return callbacks

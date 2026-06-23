@@ -145,9 +145,11 @@ The DDSM score network follows the official promoter-design ScoreNet structure:
 - simplex-valued DNA states
 - zero-mean score outputs
 
-For paper-like training, pass a precomputed Jacobi diffusion noise table. If no
-noise table is passed, the model falls back to a lightweight direct Dirichlet
-noising objective intended only for debugging/smoke tests.
+For paper-like training, pass a precomputed Jacobi diffusion noise table. With
+the default `use_official_noise=True`, DDSM intentionally refuses to start
+without this table, so an accidental lightweight approximation is not trained
+and reported as the paper model. A direct Dirichlet noising fallback still exists
+in code for debugging only when `use_official_noise=False`.
 
 ## 1. Prepare Environment
 
@@ -184,8 +186,8 @@ runs G4STAB, and stores the continuous `predicted_tm`. It does not create
 
 ```bash
 python preprocessing/annotate_structure_conditions.py \
-  --input_table ../../quadruplex/data/EQ_hg38_lifted.bed \
-  --file_path_seq ../../quadruplex/data/hg38.fa \
+  --input_table data/EQ_hg38_lifted.bed \
+  --file_path_seq data/hg38.fa \
   --output_csv data/processed/g4_structure_conditions.csv
 ```
 
@@ -265,10 +267,10 @@ estimate them after the processed dataset is built:
 ```bash
 python preprocessing/estimate_ddsm_time_weights.py \
   --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
+  --condition_mode joint \
   --noise_table_path data/ddsm_noise/steps400.cat4.speed_balance.time4.0.samples100000.pth \
   --output_path data/ddsm_noise/time_dependent_weights.pth \
-  --batch_size 256 \
+  --batch_size 512 \
   --passes 1
 ```
 
@@ -293,8 +295,8 @@ Run a fast model smoke test:
 
 ```bash
 python tests/test_models.py \
-  --file_path_quadruplex ../../quadruplex/data/EQ_hg38_lifted.bed \
-  --file_path_seq ../../quadruplex/data/hg38.fa \
+  --processed_csv data/processed/g4_structure_conditions.csv \
+  --file_path_seq data/hg38.fa \
   --seq_len 128 \
   --batch_size 2 \
   --max_items 4
@@ -323,13 +325,13 @@ data/processed/g4_structure_conditions.csv
 
 ```bash
 python main.py \
-  --experiment_name topology_lstm \
+  --experiment_name topology_stability_lstm \
   --model_type lstm \
   --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
-  --batch_size 256 \
-  --max_epochs 200 \
-  --max_steps 450000 \
+  --condition_mode joint \
+  --batch_size 512 \
+  --max_epochs 500 \
+  --max_steps -1 \
   --num_workers 4 \
   --devices 1 \
   --progress_bar
@@ -339,13 +341,13 @@ python main.py \
 
 ```bash
 python main.py \
-  --experiment_name topology_vae \
+  --experiment_name topology_stability_vae \
   --model_type vae \
   --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
-  --batch_size 256 \
-  --max_epochs 200 \
-  --max_steps 450000 \
+  --condition_mode joint \
+  --batch_size 512 \
+  --max_epochs 500 \
+  --max_steps -1 \
   --num_workers 4 \
   --devices 1 \
   --progress_bar
@@ -355,17 +357,17 @@ python main.py \
 
 ```bash
 python main.py \
-  --experiment_name topology_dfm \
+  --experiment_name topology_stability_dfm \
   --model_type dfm \
   --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
+  --condition_mode joint \
   --batch_size 512 \
-  --max_epochs 5000 \
-  --max_steps 450000 \
+  --max_epochs 500 \
+  --max_steps -1 \
   --num_workers 4 \
   --devices 1 \
   --guidance_mode probability_addition \
-  --guidance_scale 3.0 \
+  --guidance_scale 1.0 \
   --progress_bar
 ```
 
@@ -373,37 +375,34 @@ python main.py \
 
 ```bash
 python main.py \
-  --experiment_name topology_dfm_transformer \
+  --experiment_name topology_stability_dfm_transformer \
   --model_type dfm_transformer \
   --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
+  --condition_mode joint \
   --batch_size 512 \
-  --max_epochs 5000 \
-  --max_steps 450000 \
+  --max_epochs 500 \
+  --max_steps -1 \
   --num_workers 4 \
   --devices 1 \
   --guidance_mode probability_addition \
-  --guidance_scale 3.0 \
+  --guidance_scale 1.0 \
   --progress_bar
 ```
 
 ### DDSM
 
+Full DDSM pipeline:
+
 ```bash
-python main.py \
-  --experiment_name topology_ddsm \
-  --model_type ddsm \
-  --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
-  --ddsm_noise_table_path data/ddsm_noise/steps400.cat4.speed_balance.time4.0.samples100000.pth \
-  --ddsm_time_dependent_weights_path data/ddsm_noise/time_dependent_weights.pth \
-  --batch_size 256 \
-  --max_epochs 200 \
-  --max_steps 450000 \
-  --num_workers 4 \
-  --devices 1 \
-  --guidance_scale 1.0 \
-  --progress_bar
+./run_ddsm_full.sh
+```
+
+The script runs three commands in sequence: official DDSM noise precomputation,
+time-dependent weight estimation, and joint topology/stability-conditioned DDSM
+training. For continuing from an existing checkpoint, use:
+
+```bash
+./run_ddsm_resume.sh
 ```
 
 ## 7. SLURM Examples
@@ -428,13 +427,13 @@ cd /path/to/BIO/research/g4_structure_conditioning
 mkdir -p logs/slurm
 
 python main.py \
-  --experiment_name topology_dfm \
+  --experiment_name topology_stability_dfm \
   --model_type dfm \
   --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
+  --condition_mode joint \
   --batch_size 512 \
-  --max_epochs 5000 \
-  --max_steps 450000 \
+  --max_epochs 500 \
+  --max_steps -1 \
   --num_workers 4 \
   --devices 1 \
   --progress_bar
@@ -457,32 +456,9 @@ python main.py \
 
 set -euo pipefail
 cd /path/to/BIO/research/g4_structure_conditioning
-mkdir -p logs/slurm data/ddsm_noise
+mkdir -p logs/slurm
 
-NOISE=data/ddsm_noise/steps400.cat4.speed_balance.time4.0.samples100000.pth
-if [ ! -f "$NOISE" ]; then
-  python external_tools/ddsm/presample_noise.py \
-    -n 100000 \
-    -c 4 \
-    -t 400 \
-    --max_time 4 \
-    --speed_balance \
-    --out_path data/ddsm_noise
-fi
-
-python main.py \
-  --experiment_name topology_ddsm \
-  --model_type ddsm \
-  --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
-  --ddsm_noise_table_path "$NOISE" \
-  --batch_size 256 \
-  --max_epochs 200 \
-  --max_steps 450000 \
-  --num_workers 4 \
-  --devices 1 \
-  --guidance_scale 1.0 \
-  --progress_bar
+./run_ddsm_full.sh
 ```
 
 Submit:
@@ -504,13 +480,14 @@ Resume training:
 
 ```bash
 python main.py \
-  --experiment_name topology_dfm \
+  --experiment_name topology_stability_dfm \
   --model_type dfm \
   --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
-  --ckpt_path checkpoints/dfm/topology_dfm/last.ckpt \
+  --condition_mode joint \
+  --ckpt_path checkpoints/dfm/topology_stability_dfm/last.ckpt \
   --batch_size 512 \
-  --max_steps 450000 \
+  --max_epochs 500 \
+  --max_steps -1 \
   --progress_bar
 ```
 
@@ -518,12 +495,12 @@ Evaluate a checkpoint without training:
 
 ```bash
 python main.py \
-  --experiment_name topology_dfm_test \
+  --experiment_name topology_stability_dfm_test \
   --model_type dfm \
   --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
+  --condition_mode joint \
   --run_mode test \
-  --ckpt_path checkpoints/dfm/topology_dfm/last.ckpt \
+  --ckpt_path checkpoints/dfm/topology_stability_dfm/last.ckpt \
   --batch_size 512 \
   --num_workers 4 \
   --devices 1 \
@@ -534,14 +511,15 @@ For DDSM checkpoints trained with official noise:
 
 ```bash
 python main.py \
-  --experiment_name topology_ddsm_test \
+  --experiment_name topology_stability_ddsm_test \
   --model_type ddsm \
   --processed_csv data/processed/g4_structure_conditions.csv \
-  --condition_mode topology \
+  --condition_mode joint \
   --run_mode test \
-  --ckpt_path checkpoints/ddsm/topology_ddsm/last.ckpt \
+  --ckpt_path checkpoints/ddsm/topology_stability_ddsm/last.ckpt \
   --ddsm_noise_table_path data/ddsm_noise/steps400.cat4.speed_balance.time4.0.samples100000.pth \
-  --batch_size 256 \
+  --ddsm_time_dependent_weights_path data/ddsm_noise/time_dependent_weights.pth \
+  --batch_size 512 \
   --devices 1 \
   --progress_bar
 ```
@@ -553,13 +531,14 @@ Generate 2000 sequences for a topology condition:
 ```bash
 python generate.py \
   --model_type dfm \
-  --ckpt_path checkpoints/dfm/topology_dfm/last.ckpt \
-  --condition_mode topology \
-  --topology parallel \ \
+  --ckpt_path checkpoints/dfm/topology_stability_dfm/last.ckpt \
+  --condition_mode joint \
+  --stability medium \
+  --topology parallel \
   --num_samples 2000 \
   --batch_size 64 \
-  --guidance_scale 3.0 \
-  --output_jsonl generated/dfm_parallel.jsonl
+  --guidance_scale 1.0 \
+  --output_jsonl generated/dfm_medium_parallel.jsonl
 ```
 
 DDSM generation:
@@ -567,14 +546,16 @@ DDSM generation:
 ```bash
 python generate.py \
   --model_type ddsm \
-  --ckpt_path checkpoints/ddsm/topology_ddsm/last.ckpt \
-  --condition_mode topology \
-  --topology parallel \ \
+  --ckpt_path checkpoints/ddsm/topology_stability_ddsm/last.ckpt \
+  --condition_mode joint \
+  --stability medium \
+  --topology parallel \
   --ddsm_noise_table_path data/ddsm_noise/steps400.cat4.speed_balance.time4.0.samples100000.pth \
+  --ddsm_time_dependent_weights_path data/ddsm_noise/time_dependent_weights.pth \
   --num_samples 2000 \
   --batch_size 64 \
   --guidance_scale 1.0 \
-  --output_jsonl generated/ddsm_parallel.jsonl
+  --output_jsonl generated/ddsm_medium_parallel.jsonl
 ```
 
 ## 10. Outputs
@@ -590,8 +571,11 @@ examples/<model_type>/<experiment_name>.jsonl
 The checkpoint callback monitors:
 
 ```text
-val_perplexity
+val_loss
 ```
+
+For training runs, the top 10 checkpoints by validation loss are retained
+together with `last.ckpt`.
 
 The generative metrics callback logs:
 

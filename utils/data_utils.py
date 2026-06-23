@@ -24,19 +24,11 @@ CONDITION_CLASSES = [STABILITY_CLASSES, TOPOLOGY_CLASSES]
 def load_data(
     data_path,
     max_g4stab_std=5.0,
-    stability_low_tm=52.0,
+    stability_low_tm=50.0,
     stability_high_tm=65.0,
-    topology_classes=None,
 ):
-    if str(data_path).endswith(".bed"):
-        cols = ["chrom", "start", "end", "level_raw", "score", "strand"]
-        df = pd.read_csv(data_path, sep="\t", names=cols)
-        df["level"] = df["level_raw"].str.extract(r"(\d+)").astype(int)
-        df["length"] = df["end"] - df["start"]
-        df = df[df["length"] <= df["length"].quantile(0.99)]
-        return df[df["level"] > 3].reset_index(drop=True)
-
     df = pd.read_csv(data_path)
+    df = df[df["length"] <= df["length"].quantile(0.99)]
     df["stability_class"] = pd.cut(
         df["predicted_tm"],
         bins=[float("-inf"), stability_low_tm, stability_high_tm, float("inf")],
@@ -45,8 +37,10 @@ def load_data(
     ).astype(str)
     if max_g4stab_std is not None:
         df = df[df["g4stab_std"] <= float(max_g4stab_std)].copy()
-    classes = TOPOLOGY_CLASSES if topology_classes is None else [str(item) for item in topology_classes]
-    df = df[df["topology_label"].astype(str).isin(classes)].copy()
+    df = df[df["topology_label"].astype(str).isin(TOPOLOGY_CLASSES)].copy()
+    df["joint_condition"] = (
+        df["stability_class"].astype(str) + "|" + df["topology_label"].astype(str)
+    )
     return df.reset_index(drop=True)
 
 
@@ -55,49 +49,34 @@ def split_data(
     split=0.8,
     val_split=0.1,
     seed=42,
-    condition_names=None,
-    condition_classes=None,
     max_g4stab_std=5.0,
-    stability_low_tm=52.0,
+    stability_low_tm=50.0,
     stability_high_tm=65.0,
     log_sizes=False,
 ):
-    condition_names = CONDITION_NAMES if condition_names is None else normalize_condition_names(condition_names)
-    topology_classes = None
-    if condition_classes is not None and "topology_label" in condition_names:
-        topology_idx = condition_names.index("topology_label")
-        topology_classes = condition_classes[topology_idx]
     df = load_data(
         data_path,
         max_g4stab_std=max_g4stab_std,
         stability_low_tm=stability_low_tm,
         stability_high_tm=stability_high_tm,
-        topology_classes=topology_classes,
     ).sample(frac=1, random_state=seed).reset_index(drop=True)
-    if set(condition_names).issubset(df.columns):
-        if condition_classes is not None:
-            for condition_name, class_group in zip(condition_names, condition_classes, strict=True):
-                df = df[df[condition_name].astype(str).isin([str(item) for item in class_group])].copy()
-        stratify = df[condition_names].astype(str).agg("|".join, axis=1)
-    else:
-        stratify = df["level"]
     train_df, rest_df = train_test_split(
         df,
         test_size=1.0 - split,
-        stratify=stratify,
+        stratify=df["joint_condition"],
         random_state=seed,
     )
-    rest_stratify = rest_df[condition_names].astype(str).agg("|".join, axis=1) if set(condition_names).issubset(rest_df.columns) else rest_df["level"]
     test_df, val_df = train_test_split(
         rest_df,
         test_size=val_split / (1.0 - split),
-        stratify=rest_stratify,
+        stratify=rest_df["joint_condition"],
         random_state=seed,
     )
     if log_sizes:
-        logging.info("Data size: train=%d val=%d test=%d", len(train_df), len(val_df), len(test_df))
-        if set(condition_names).issubset(df.columns):
-            logging.info("Joint condition counts:\n%s", df.groupby(condition_names).size())
+        logging.info(
+            "Data size: train=%d val=%d test=%d", len(train_df), len(val_df), len(test_df)
+        )
+        logging.info("Joint condition counts:\n%s", df.groupby(CONDITION_NAMES).size())
     return {"train": train_df, "val": val_df, "test": test_df, "all": df}
 
 
@@ -105,15 +84,6 @@ def normalize_condition_names(condition_names):
     if isinstance(condition_names, str):
         return [condition_names]
     return [str(name) for name in condition_names]
-
-
-def condition_classes_from_data(df, condition_name, condition_classes=None):
-    if condition_classes:
-        return [str(item) for item in condition_classes]
-    values = sorted(str(value) for value in df[condition_name].dropna().unique())
-    if not values:
-        raise ValueError(f"No condition classes found for {condition_name}")
-    return values
 
 
 class QuadDataset(Dataset):
@@ -124,7 +94,6 @@ class QuadDataset(Dataset):
         file_path_seq=None,
         typer="rec",
         seq_len=512,
-        level_offset=4,
         condition_names=None,
         condition_classes=None,
     ):
@@ -133,8 +102,6 @@ class QuadDataset(Dataset):
         self.genome = Fasta(file_path_seq) if file_path_seq else None
         self.typer = typer
         assert self.typer in ["rec", "gen"]
-        self.level_offset = int(level_offset)
-        self.sequence_column = "model_sequence" if "model_sequence" in df.columns else None
         self.condition_names = CONDITION_NAMES if condition_names is None else normalize_condition_names(condition_names)
         self.condition_classes = CONDITION_CLASSES if condition_classes is None else [
             [str(item) for item in group] for group in condition_classes
@@ -146,7 +113,7 @@ class QuadDataset(Dataset):
         self.encoded_seqs = []
         self.conditions = []
         for _, row in df.iterrows():
-            seq = self.get_sequence(row)
+            seq = self.generate_full_sequence(row["start"], row["end"], row["chrom"])
             cond = self.get_condition(row)
             if seq is None or cond is None:
                 continue
@@ -162,30 +129,16 @@ class QuadDataset(Dataset):
             ids.append(VOCAB[ch])
         return torch.tensor(ids, dtype=torch.long)
 
-    def get_sequence(self, row):
-        if self.sequence_column is not None:
-            seq = str(row[self.sequence_column]).upper()
-            if len(seq) == self.seq_len and all(base in VOCAB for base in seq):
-                return seq
-            return None
-        if self.genome is None:
-            return None
-        return self.generate_full_sequence(row["start"], row["end"], row["chrom"])
-
     def get_condition(self, row):
-        if set(self.condition_names).issubset(row.index):
-            ids = []
-            for condition_name, mapping in zip(
-                self.condition_names, self.condition_to_id, strict=True
-            ):
-                value = str(row[condition_name])
-                if value not in mapping:
-                    return None
-                ids.append(mapping[value])
-            return ids
-        if "level" in row.index:
-            return [int(row["level"]) - self.level_offset]
-        return None
+        ids = []
+        for condition_name, mapping in zip(
+            self.condition_names, self.condition_to_id, strict=True
+        ):
+            value = str(row[condition_name])
+            if value not in mapping:
+                return None
+            ids.append(mapping[value])
+        return ids
 
     def generate_full_sequence(self, start, end, chrom):
         chrom_sequence = self.genome[chrom]
@@ -226,7 +179,7 @@ def save_examples(predictions, output_path, max_examples=20, *, compact=False):
     with open(output_path, "w", encoding="utf-8") as f:
         for batch_out in predictions:
             x = batch_out["x"]
-            cond = batch_out["levels"]
+            cond = batch_out["conditions"]
             recon = batch_out["recon"]
             gen = batch_out["gen"]
             batch_size = x.size(0)
@@ -235,13 +188,13 @@ def save_examples(predictions, output_path, max_examples=20, *, compact=False):
                 if compact:
                     row = {
                         "id": saved,
-                        "cond": cond_value,
+                        "conditions": cond_value,
                         "generation_seq": decode_seq(gen[i].tolist()),
                     }
                 else:
                     row = {
                         "id": saved,
-                        "cond": cond_value,
+                        "conditions": cond_value,
                         "test_x": x[i].tolist(),
                         "reconstruction": recon[i].tolist(),
                         "generation": gen[i].tolist(),

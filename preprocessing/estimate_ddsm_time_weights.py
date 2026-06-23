@@ -22,7 +22,7 @@ from utils.model_utils import torch_load
 def parse_args():
     parser = argparse.ArgumentParser(description="Estimate DDSM time-dependent loss weights.")
     parser.add_argument("--processed_csv", default="data/processed/g4_structure_conditions.csv")
-    parser.add_argument("--file_path_seq", default="../../quadruplex/data/hg38.fa")
+    parser.add_argument("--file_path_seq", default="data/hg38.fa")
     parser.add_argument(
         "--condition_mode",
         default=CFG["condition_mode"],
@@ -101,8 +101,6 @@ def main():
     spec = CFG["condition_specs"][args.condition_mode]
     split_dfs = split_data(
         args.processed_csv,
-        condition_names=spec["names"],
-        condition_classes=spec["classes"],
         max_g4stab_std=CFG["max_g4stab_std"],
         stability_low_tm=CFG["stability_low_tm"],
         stability_high_tm=CFG["stability_high_tm"],

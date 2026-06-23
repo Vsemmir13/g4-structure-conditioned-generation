@@ -217,7 +217,7 @@ class DNAConvVAE(LightningModule):
         gen = self.generate(cond)
         return {
             "x": x.detach().cpu(),
-            "levels": cond.detach().cpu(),
+            "conditions": cond.detach().cpu(),
             "recon": recon.detach().cpu(),
             "gen": gen.detach().cpu(),
             "mu": mu.detach().cpu(),

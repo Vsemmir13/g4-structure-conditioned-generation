@@ -133,7 +133,7 @@ class QuadDDSMModule(LightningModule):
         max_time=4.0,
         dirichlet_scale=24.0,
         score_clip=50.0,
-        denoising_loss_weight=0.05,
+        denoising_loss_weight=0.0,
         num_sampling_steps=100,
         sampling_noise=0.02,
         classifier_free_guidance=False,
@@ -168,6 +168,11 @@ class QuadDDSMModule(LightningModule):
         self.v_one_loggrad = None
         self.timepoints = None
         if not noise_table_path:
+            if bool(self.hparams.use_official_noise):
+                raise ValueError(
+                    "Official DDSM training requires noise_table_path. "
+                    "Create it with external_tools/ddsm/presample_noise.py or set use_official_noise=False."
+                )
             return
         if diffusion_fast_flatdirichlet is None or gx_to_gv is None or UnitStickBreakingTransform is None:
             raise ImportError("Cannot import official DDSM utilities from external_tools/ddsm/ddsm.py")
@@ -460,7 +465,7 @@ class QuadDDSMModule(LightningModule):
         gen = self.generate(cond)
         return {
             "x": x.detach().cpu(),
-            "levels": cond.detach().cpu(),
+            "conditions": cond.detach().cpu(),
             "recon": x.detach().cpu(),
             "gen": gen.detach().cpu(),
         }

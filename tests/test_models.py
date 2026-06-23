@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 def main():
     parser = argparse.ArgumentParser(description="Fast smoke test for VAE/LSTM/DFM variants")
-    parser.add_argument("--file_path_quadruplex", type=str, required=True)
+    parser.add_argument("--processed_csv", type=str, default="data/processed/g4_structure_conditions.csv")
     parser.add_argument("--file_path_seq", type=str, required=True)
     parser.add_argument("--seq_len", type=int, default=512)
     parser.add_argument("--batch_size", type=int, default=32)
@@ -30,7 +30,7 @@ def main():
 
     pl.seed_everything(42, workers=True)
 
-    split_dfs = split_data(args.file_path_quadruplex, split=0.8, val_split=0.1, seed=42)
+    split_dfs = split_data(args.processed_csv, split=0.8, val_split=0.1, seed=42)
     train_df = split_dfs["train"]
     val_df = split_dfs["val"]
 
@@ -51,7 +51,8 @@ def main():
     lstm_val_loader = DataLoader(
         lstm_val, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers
     )
-    lstm_model = QuadLSTM(vocab_size=5)
+    num_cls = [3, 3]
+    lstm_model = QuadLSTM(vocab_size=5, num_cls=num_cls)
 
     # --- VAE (reconstruction) ---
     vae_train = small(
@@ -66,7 +67,7 @@ def main():
     vae_val_loader = DataLoader(
         vae_val, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers
     )
-    vae_model = DNAConvVAE(seq_len=args.seq_len)
+    vae_model = DNAConvVAE(seq_len=args.seq_len, num_cls=num_cls)
 
     # --- DFM (Dirichlet flow matching) ---
     dfm_train = small(
@@ -81,19 +82,22 @@ def main():
     dfm_val_loader = DataLoader(
         dfm_val, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers
     )
-    dfm_model = QuadDFMModule(seq_len=args.seq_len)
+    dfm_model = QuadDFMModule(seq_len=args.seq_len, num_cls=num_cls)
     dfm_transformer_model = QuadDFMModule(
         backbone="transformer",
         seq_len=args.seq_len,
+        num_cls=num_cls,
         hidden_dim=128,
         num_transformer_layers=2,
         num_attention_heads=4,
     )
     ddsm_model = QuadDDSMModule(
         seq_len=args.seq_len,
+        num_cls=num_cls,
         hidden_dim=128,
         num_layers=4,
         num_sampling_steps=8,
+        use_official_noise=False,
     )
 
     accelerator = (

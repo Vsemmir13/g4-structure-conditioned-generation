@@ -175,7 +175,7 @@ class QuadDFMModule(LightningModule):
         gen = self.generate(cond)
         return {
             "x": x.detach().cpu(),
-            "levels": cond.detach().cpu(),
+            "conditions": cond.detach().cpu(),
             "recon": x.detach().cpu(),
             "gen": gen.detach().cpu(),
         }
